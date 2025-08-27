@@ -1,0 +1,55 @@
+name: CI
+on: [push]
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    env:
+      REGISTRY: ghcr.io
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          cache-from: type=registry,ref=ghcr.io/filcdn/telegraf
+          cache-to: type=inline
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: [docker-build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+      - run: flyctl deploy --remote-only
+        env:
+          FLY_API_KEY: ${{ secrets.FLY_API_KEY }}
+      - if: failure()
+        uses: slackapi/slack-github-action@v2.1.1
+        with:
+          method: chat.postMessage
+          token: ${{ secrets.SLACK_BOT_TOKEN }}
+          payload: |
+            {
+              "text": "Deployment of `${{ github.event.repository.name }}` failed",
+              "blocks": [
+                {
+                  "channel": "alerts",
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": ":warning: *<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|Deployment of `${{ github.event.repository.name }}` failed>*"
+                  }
+                }
+              ]
+            }
