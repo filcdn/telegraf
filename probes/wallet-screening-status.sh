@@ -16,9 +16,11 @@ CLOUDFLARE_DATABASE_ID="${2:?Missing CLOUDFLARE_DATABASE_ID}"
 # --- D1 query: oldest last_screened_at in SECONDS ---
 # COALESCE ensures we always get an integer (0 means "missing/none")
 SQL='
-  SELECT COALESCE(UNIXEPOCH(last_screened_at), 0) AS last_screened_at
+  SELECT
+    COALESCE(UNIXEPOCH(last_screened_at), 0) AS oldest_check_at,
+    UNIXEPOCH("now") - COALESCE(UNIXEPOCH(last_screened_at), 0)  AS max_check_age
   FROM wallet_details
-  ORDER BY last_screened_at ASC
+  ORDER BY oldest_check_at ASC
   LIMIT 1;
 '
 
@@ -38,13 +40,26 @@ curl -sS -o "$tmp" \
   --data "$DATA"
 
 # echo "Response:" >&2
-# cat "$tmp" >&2 # for debugging
+# cat "$tmp" >&2
+# echo "" >&2
 
-# Extract first row's epoch seconds; default to 0 if empty or bad
-LAST_SCREENED_AT_SEC="$(jq -r '.result[0].results[0].last_screened_at // 0' "$tmp" || echo 0)"
+OLDEST_CHECK_AT="$(jq -r '.result[0].results[0].oldest_check_at' "$tmp")"
+MAX_CHECK_AGE="$(jq -r '.result[0].results[0].max_check_age' "$tmp")"
+
+# Validate that OLDEST_CHECK_AT is a number
+if ! [[ "$OLDEST_CHECK_AT" =~ ^[0-9]+$ ]]; then
+  echo "Error: oldest_check_at is not a valid number: '$OLDEST_CHECK_AT'" >&2
+  exit 1
+fi
+
+# Validate that MAX_CHECK_AGE is a number
+if ! [[ "$MAX_CHECK_AGE" =~ ^[0-9]+$ ]]; then
+  echo "Error: max_check_age is not a valid number: '$MAX_CHECK_AGE'" >&2
+  exit 1
+fi
 
 MEASUREMENT="wallet-screening"
-FIELDS="oldest_last_screened_at=${LAST_SCREENED_AT_SEC}i"
+FIELDS="oldest_check_at=${OLDEST_CHECK_AT}i,max_check_age=${MAX_CHECK_AGE}i"
 TAGS="environment=${ENVIRONMENT}"
 
 # Emit one line; timestamp omitted (Telegraf will add _time)
