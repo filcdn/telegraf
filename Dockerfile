@@ -1,4 +1,4 @@
-FROM telegraf:1.35
+FROM telegraf:1.36
 
 # Install additional dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends jq
